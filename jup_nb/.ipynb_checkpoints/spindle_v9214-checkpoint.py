@@ -1,19 +1,10 @@
-# ---
-# jupyter:
-#   jupytext:
-#     formats: ipynb,py:light
-#     text_representation:
-#       extension: .py
-#       format_name: light
-#       format_version: '1.5'
-#       jupytext_version: 1.16.7
-#   kernelspec:
-#     display_name: spindle_1
-#     language: python
-#     name: spindle_1
-# ---
+#!/usr/bin/env python
+# coding: utf-8
 
-# #!/usr/bin/env python
+# In[8]:
+
+
+#!/usr/bin/env python
 # coding: utf-8
 import numpy as np
 import matplotlib.pyplot as plt
@@ -40,9 +31,12 @@ from shapely.geometry.polygon import orient
 from shapely.ops import unary_union
 from sklearn.decomposition import PCA
 from scipy.ndimage import gaussian_filter1d
-# %matplotlib inline  
+get_ipython().run_line_magic('matplotlib', 'inline')
 
-# +
+
+# In[2]:
+
+
 def make_spots(FG_density,a, b, top_status,cell, spindle_poles, frame):
     """
     Generate spots based on the provided parameters.
@@ -90,6 +84,8 @@ def make_spots(FG_density,a, b, top_status,cell, spindle_poles, frame):
         # print(f'n_points_junc={n_points_junc}')
         spots = slice_array(cell, start_spot_index, end_spot_index, int(n_points_junc))
     elif(cell_type=='FE'):
+        
+        spots=np.zeros((n_points//2,2)) #make right half of the points first, then reflect and concatenate both sides into one array
 
 
         N = n_points//2
@@ -1570,7 +1566,11 @@ def move_spindle(params, astral_MTs,astral_angles, state,spindle_poles,spindle_a
     r=params[0][2] #spindle length=2*r
     drag=params[0][3]
     t_time=i*time_step
-
+    # print(f't_time, i={t_time, i}')
+    # print(int(t_time)%frame_rates[c-1]==0)
+    # print(i>int(0.9*frame_rates[c-1]))
+    # print(i<total_time/time_step)
+    # Endo cells: update cell, spots, free_spots, astral_which_spot
     dum_spot=astral_which_spot
     if (cell_type=='endo'):
         if (int(t_time)%frame_rates[c-1]==0 and i<total_time/time_step):
@@ -2385,8 +2385,9 @@ def find_number_after_cell(input_string):
     return int(number)
 
 
+# In[3]:
 
-# +
+
 #I am not stupid anymore
 
 # test_folder_path = sys.argv[1]
@@ -2468,7 +2469,10 @@ v_0=0.086
 show_vectors=1
 #drag_mt=8*np.pi*visc*L/np.log((1/np.exp(1))*(1/400)**(-2))
 
-# +
+
+# In[5]:
+
+
 task_id =1#int(os.getenv('SLURM_ARRAY_TASK_ID'))
 c=1
 #Parameters
@@ -2523,7 +2527,9 @@ elif(cell_type=='FE'):
     spread=3*np.pi/2
     spindle_b=0.8*a
 
-# -
+
+# In[6]:
+
 
 v_c=np.array([0,0])
 params=[[a,b,r,drag[0]],10,astral_number[i],sp_angle[int(task_id-1)],[angle_lim[0], center_lim[0]],  folder_name, new_dir_path]
@@ -2533,7 +2539,16 @@ push_force, pull_force=find_force(astral_MTs,spindle_poles,which_bind,which_push
 #plot intial cell and spindle
 plot_cell(cell,astral_MTs,astral_angles,state,spindle_poles,spindle_angle,push_force,pull_force,spots,-1,which_bind,which_push,v_c, -1,0, params, borders)
 
+
+# In[ ]:
+
+
 # junc_ind=[[800, 1230], [800,1180], [725, 1255],[750, 1225], [750, 1200],  [580, 770], [510,750], [480, 730], [450, 730], [430, 720], [420,700], [410,670]]      
 df_angle, df_center,df_ypos, df_count_push, df_count_pull, df_length=plot_simulate([[a,b,r,drag[0]],motor_density[0],astral_number[0],sp_angle[int(task_id-1)],[angle_lim[0], center_lim[0]],  folder_name, new_dir_path])
+
+
+# In[ ]:
+
+
 
 
