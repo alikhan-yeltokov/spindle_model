@@ -31,11 +31,11 @@ from shapely import box, LineString, normalize, Polygon
 from shapely.geometry import LineString, Polygon, Point
 from shapely.geometry.polygon import orient
 from shapely.ops import unary_union
-
+from scipy.ndimage import gaussian_filter1d
 
 # In[47]:
 
-def make_spots(motors,a, b, top_status,cell, spindle_poles, frame):
+def make_spots(motors,a, b, cell, spindle_poles, frame):
     """
     Generate spots based on the provided parameters.
     """
@@ -43,17 +43,17 @@ def make_spots(motors,a, b, top_status,cell, spindle_poles, frame):
     if(cell_type=='celegans'):
 
         n_points=motors
-        spots=cell[1::int(len(cell)/n_points)]
+        # spots=cell[1::int(len(cell)/n_points)]
         
-        # angles=get_sequence_celegans(int(0.3*n_points))
-        # spots=np.zeros((len(angles),2)) # Right side or posterior has n/2 points
-        # spots[:,0] = a*np.cos(angles)
-        # spots[:,1] = b*np.sin(angles)
-        # angles2=get_sequence_celegans(int(0.2*n_points))
-        # spots2=np.zeros((len(angles2),2)) # Left side or anterior has n/3 points
-        # spots2[:,0] = -a*np.cos(angles2)
-        # spots2[:,1] = b*np.sin(angles2)
-        # spots=np.concatenate((spots,spots2))
+        angles=get_sequence_celegans(int(0.6*n_points))
+        spots=np.zeros((len(angles),2)) # Right side or posterior has n/2 points
+        spots[:,0] = a*np.cos(angles)
+        spots[:,1] = b*np.sin(angles)
+        angles2=get_sequence_celegans(int(0.4*n_points))
+        spots2=np.zeros((len(angles2),2)) # Left side or anterior has n/3 points
+        spots2[:,0] = -a*np.cos(angles2)
+        spots2[:,1] = b*np.sin(angles2)
+        spots=np.concatenate((spots,spots2))
         
         # if (uniform_status==1):
         #     n_top=n_points//2 # Add an arbitrary number of uniformly distributed FGs in addition to the existing ones
@@ -94,9 +94,9 @@ def make_spots(motors,a, b, top_status,cell, spindle_poles, frame):
         N = n_points//2
         gaussian_spaced_points=gauss_points(N)
         angles = np.deg2rad(gaussian_spaced_points)-np.pi/2
-        
+        angles = angles[np.abs(angles) <= np.pi/3]
         # Initialize spots array
-        spots = np.zeros((N, 2))
+        spots = np.zeros((len(angles), 2))
         
         # Compute x and y coordinates
         spots[:, 0] = np.cos(angles )  # x-coordinates
@@ -112,18 +112,21 @@ def make_spots(motors,a, b, top_status,cell, spindle_poles, frame):
         spots[:,0] = a*np.cos(angles-0*np.pi)
         spots[:,1] = b*np.sin(angles-0*np.pi)
         
-        other_half=np.zeros((n_points//2-2,2)) #spots on left side
-        other_half[:,0]=-spots[1:-1,0]
-        other_half[:,1]=spots[1:-1,1]
-        other_half=other_half[1:]
+        other_half=np.zeros((len(angles),2)) #spots on left side
+        # other_half[:,0]=-spots[1:-1,0]
+        # other_half[:,1]=spots[1:-1,1]
+        other_half[:,0]=-spots[:,0]
+        other_half[:,1]=spots[:,1]
+        # other_half=other_half[1:]
         spots=np.concatenate((spots,other_half))
 
         # Add extra FGs at the top/apical surface of the cell
-        if (top_status==1):
+        if (config.top_status==1):
             
             n_top=n_points
-            angles=np.linspace(np.pi/6, 5*np.pi/6, n_top)
-            # angles=get_sequence_top(n_top) The option to make top/apical FGs non-uniformly distributed
+            # angles=np.linspace(np.pi/6, 5*np.pi/6, n_top)
+            # angles=get_sequence_top(n_top) #The option to make top/apical FGs non-uniformly distributed
+            angles=get_sequence_celegans(n_top)+np.pi/2
             spots_apical=np.zeros((len(angles),2))
             spots_apical[:,0] = a*np.cos(angles)
             spots_apical[:,1] = b*np.sin(angles)            
@@ -131,6 +134,47 @@ def make_spots(motors,a, b, top_status,cell, spindle_poles, frame):
             # spots=np.concatenate((spots,spots_apical)) 
             
     return spots#_apical
+
+def transform_junctions():
+    # Get spindle size from its contours
+    if (c>12):
+        spindle_contour=get_contours('./spindles/spindle_'+str(c)+'/Mask_'+str(starts[c-1])+'.jpg')
+    else:
+        spindle_contour=get_contours('./spindles/spindle_'+str(c)+'/Spindle_'+str(starts[c-1])+'.jpg')
+    spindle_input=np.zeros((len(spindle_contour),2))
+    for i in range (len(spindle_input)):
+        spindle_input[i,0]=spindle_contour[i,0]/rescale[c-1]
+        spindle_input[i,1]=spindle_contour[i,1]/rescale[c-1]
+    shapely_string = LineString(spindle_input)
+    spindle_center=np.array([shapely_string.centroid.x,shapely_string.centroid.y])
+    
+    # print(f'spindle center -{20.61,31.83} -> {spindle_center}')
+    measured_spindle_center=np.array([[20.61,-31.83],
+                                       [23.6,-47.2],
+                                       [16.15,-52.10],
+                                       [0,0],
+                                       [14.59,-38.55],
+                                       [0,0],
+                                       [17.87,-25.61],
+                                       [26.79, -28.4],
+                                       [14.77, -33.83],
+                                       [11.2, -24.55],
+                                       [22.29, -55.57],
+                                       [16.42, -79.26],
+                                       [21.76, -42.18],
+                                       [21.33, -49.93],
+                                       [27.72, -73.78]])
+    # FGs
+    file_path = "./junctions/C"+str(c)+"_Mask_Movie_Junctions.txt"
+    data = np.loadtxt(file_path)
+    data[:, 1] = -data[:, 1]
+    juncs = data.reshape(-1, 2, 2)
+   
+    transf_coef=spindle_center/measured_spindle_center[c-1]
+
+    juncs=juncs*transf_coef-spindle_center
+
+    return juncs
 
 def gauss_points(N):
     # Gaussian parameters from the fit (replace with your actual values)
@@ -151,7 +195,7 @@ def gauss_points(N):
     gaussian_spaced_points = np.sort(gaussian_spaced_points)
     return gaussian_spaced_points
     
-def make_spots_reserve(FG_density,a, b, top_status,cell, spindle_poles, frame):
+def make_spots_reserve(FG_density,a, b,cell, spindle_poles, frame):
     """
     Generate spots based on the provided parameters.
     """
@@ -228,7 +272,7 @@ def make_spots_reserve(FG_density,a, b, top_status,cell, spindle_poles, frame):
         spots=np.concatenate((spots[1:],other_half))
 
         # Add extra FGs at the top/apical surface of the cell
-        if (top_status==1):
+        if (config.top_status==1):
             
             n_top=n_points
             angles=np.linspace(np.pi/6, 5*np.pi/6, n_top)
@@ -532,7 +576,84 @@ def get_contours(image_path):
         all_points[:, 1] = -all_points[:, 1]
 
         return all_points
-            
+
+def smoothen_cell(cell):
+    # Example: Replace this with your actual contour coordinates (N, 2)
+    contours = cell  # Replace with actual contour coordinates
+    
+    # Separate x and y coordinates
+    x = contours[:, 0]
+    y = contours[:, 1]
+    
+    # Apply Gaussian smoothing to both x and y coordinates
+    sigma = 10  # Adjust sigma for more or less smoothing
+    x_smooth = gaussian_filter1d(x, sigma=sigma)
+    y_smooth = gaussian_filter1d(y, sigma=sigma)
+    
+    # Combine the smoothed x and y coordinates back into an array
+    smoothed_contours = np.column_stack((x_smooth, y_smooth))
+    
+    # Plot the original and smoothed contours for comparison
+    # plt.figure(figsize=(6, 6))
+    # plt.plot(x, y, label='Original Contours', color='red', linewidth=2)
+    # plt.plot(x_smooth, y_smooth, label='Smoothed Contours', color='blue', linewidth=2)
+    # plt.legend()
+    # plt.gca().set_aspect('equal')
+    # plt.title('Original vs Smoothed Contours')
+    # plt.show()
+    return smoothed_contours
+def close_contours(contours):
+    """
+    Turn a contour array into a closed loop by adding points between the start and end
+    such that the distance between points is less than or equal to `min_spacing`.
+
+    Parameters:
+    -----------
+    contours : np.ndarray
+        The array of contour coordinates with shape (N, 2).
+    min_spacing : float
+        The minimal spacing between the points to be added.
+
+    Returns:
+    --------
+    closed_contours : np.ndarray
+        The array of contour coordinates with the newly added points to close the loop.
+    """
+    # Extract the start and end points
+    end_point = contours[0]
+    start_point = contours[-1]
+
+ 
+
+    # Calculate the Euclidean distance between the start and end points
+    distance = np.linalg.norm(end_point - start_point)
+    
+    min_spacing=0.005
+    # Calculate how many points to add based on the minimal spacing
+    num_points_to_add = int(np.ceil(distance / min_spacing))
+ 
+
+    # Create the interpolation for the required number of points
+    x_new = np.linspace(start_point[0], end_point[0], num_points_to_add + 2)  # +2 includes start and end points
+    y_new = np.linspace(start_point[1], end_point[1], num_points_to_add + 2)
+
+    # Remove the first and last points from the new points to avoid duplication with original points
+    x_new = x_new[1:-1]
+    y_new = y_new[1:-1]
+
+    # Combine the new points into a new array
+    new_points = np.column_stack((x_new, y_new))
+
+    # Combine original contours with new points to form a closed contour
+    closed_contours = np.vstack([contours, new_points])
+
+    # Close the loop by adding the first point at the end
+    # closed_contours = np.vstack([closed_contours, closed_contours[0]])
+
+   
+    
+    return closed_contours
+
 def make_cell(params):
     """
     Returns an array (N,2) of x,y coordinates of vertices of a polygon representing the cell
@@ -559,7 +680,10 @@ def make_cell(params):
         cell=enhance_cell(cell_input)
 
         # Get spindle size from its contours
-        spindle_contour=get_contours('./spindles/spindle_'+str(c)+'/Spindle_'+str(starts[c-1])+'.jpg')
+        if (c>12):
+            spindle_contour=get_contours('./spindles/spindle_'+str(c)+'/Mask_'+str(starts[c-1])+'.jpg')
+        else:
+            spindle_contour=get_contours('./spindles/spindle_'+str(c)+'/Spindle_'+str(starts[c-1])+'.jpg')
         spindle_input=np.zeros((len(spindle_contour),2))
         for i in range (len(spindle_input)):
             spindle_input[i,0]=spindle_contour[i,0]/rescale[c-1]
@@ -603,7 +727,7 @@ def make_cell(params):
             break
             
     # Making motors
-    spots=make_spots(FG_density,a, b,params[3],cell, spindle_poles, 1)
+    spots=make_spots(FG_density,a, b,cell, spindle_poles, 1)
     
     # Making astral microtubules
     astral_MTs, astral_angles, state,which_push,which_bind,free_spots,astral_which_spot, orig_length, df_list2=make_astral_MTs(params,cell,spindle_poles, spindle_angle,spots)
@@ -628,7 +752,10 @@ def update_cell(params, t_time):
 
 
     # Get spindle size from its contours
-    spindle_contour=get_contours('./spindles/spindle_'+str(c)+'/Spindle_'+str(starts[c-1])+'.jpg')
+    if (c>12):
+        spindle_contour=get_contours('./spindles/spindle_'+str(c)+'/Mask_'+str(starts[c-1])+'.jpg')
+    else:
+        spindle_contour=get_contours('./spindles/spindle_'+str(c)+'/Spindle_'+str(starts[c-1])+'.jpg')
     spindle_input=np.zeros((len(spindle_contour),2))
     for i in range (len(spindle_input)):
         spindle_input[i,0]=spindle_contour[i,0]/rescale[c-1]
@@ -684,6 +811,7 @@ def make_astral_MTs(params,cell, spindle_poles, spindle_angle,spots):
     # Initializing all arrays to keep MTs data
     
     state=np.ones((2,(n_astro))) #two states: growing=1, shrinking=-1
+    # state = np.random.choice([-1, 1], size=(2, n_astro)) 
     free_spots=np.zeros((len(spots)))#array 0 if spot is free, 1 is taken
     astral_which_spot=np.zeros((len(spots),2))-1 #which astro occupies given spot by index (astral_which_spot[5]=[1,20] means the fifth spot is occupied by (1,20)), i dont remember where -1 is coming from, its coming from not confusing value 0,0 (-1,-1) with actual MT [0,0]
     which_bind=np.zeros((2,int(n_astro))) #astral MTs have binded
@@ -714,7 +842,7 @@ def make_astral_MTs(params,cell, spindle_poles, spindle_angle,spots):
             # orig_length[i,j]=LA.norm(length_tc-spindle_poles[i])*bounded_normal_random(mean, stdev)
             
             # print(f'astral=[{i,j}]')
-            end,state[i,j]=grow_astralMT(a,b,astral_angles[i,j],spindle_poles[i],cell,orig_length[i,j])
+            end=grow_astralMT(a,b,astral_angles[i,j],spindle_poles[i],cell,orig_length[i,j])
             # state[i,j]=1 if (np.random.rand()>0.5) else -1
             astral_MTs[i,j,:,0]=np.linspace(spindle_poles[i,0],end[0],config.discr)
             astral_MTs[i,j,:,1]=np.linspace(spindle_poles[i,1],end[1],config.discr)
@@ -725,8 +853,8 @@ def make_astral_MTs(params,cell, spindle_poles, spindle_angle,spots):
                 which_push[i,j]=0
                 state[i,j]=-1
             # state[i,j]=1 if which_bind[i,j]==0 else -1
-            # which_push[i,j]=check_push(a,b,astral_MTs[i,j,-1],which_bind[i,j],state[i,j],astral_angles[i,j],spindle_poles[i],cell)
-            which_push[i,j]=check_push_junc(a,b,astral_MTs[i,j,-1],which_bind[i,j],state[i,j],astral_angles[i,j],spindle_poles[i],cell, spots)
+            which_push[i,j]=check_push(a,b,astral_MTs[i,j,-1],state[i,j],astral_angles[i,j],spindle_poles[i],cell)
+            # which_push[i,j]=check_push_junc(a,b,astral_MTs[i,j,-1],which_bind[i,j],state[i,j],astral_angles[i,j],spindle_poles[i],cell, spots)
             orig_length[i,j]=LA.norm(astral_MTs[i,j,-1]-spindle_poles[i]) 
 
             # List to keep MTs data
@@ -920,6 +1048,66 @@ def check_bind_init(i,j,astral,spindle_poles,spots,free_spots,astral_which_spot)
     return bind,free_spots,astral_which_spot
 
 
+
+def check_push_bind(i, j, astral, spindle_poles, spots, free_spots, astral_which_spot, state, astral_angles, cell):
+    """
+    Combined function that checks both binding and pushing conditions for an astral MT.
+    
+    Parameters:
+        i, j: MT indices
+        astral: Astral MT tip coordinates
+        spindle_poles: Spindle poles coordinates
+        spots: FG spot coordinates
+        free_spots: Array indicating available spots
+        astral_which_spot: Tracking array
+        state: MT state (1=growth, -1=shrink)
+        astral_angles: MT angles
+        cell: Cell geometry
+    
+    Returns:
+        bind: 1 if bound, 0 otherwise
+        push: 1 if pushing, 0 otherwise
+        free_spots: Updated free spots array
+        astral_which_spot: Updated tracking array
+    """
+    
+    # Initialize outputs
+    bind = 0
+    push = 0
+    
+    # Check binding condition
+    dist = distance_matrix(np.array([astral]), spots)
+    
+    if (np.min(dist[0])<=config.max_interact_dist and free_spots[np.argmin(dist[0])]==0 and random.uniform(0, 1)<=prob_dyn_bind):
+        
+        free_spots[np.argmin(dist[0])]=1
+        bind=1
+        state=-1
+        astral_which_spot[np.argmin(dist[0]),0]=i
+        astral_which_spot[np.argmin(dist[0]),1]=j
+        
+        # print(f'CHECK BIND->{bind>0}')
+    
+    # Check pushing condition (only if not bound)
+    if bind == 0:
+        
+        end, _ = intersect_cell(a,b,astral_angles,spindle_poles[i],cell)
+        
+        # print(f'close enough? {math.isclose(abs(LA.norm(end) - LA.norm(astral)), 0, abs_tol=1e-15)}')
+        
+        # print(f'diff={LA.norm(end) - LA.norm(astral)}')
+        # print(f'state={state}')
+        
+        if (math.isclose(abs(LA.norm(end) - LA.norm(astral)), 0, abs_tol=1e-15) and state == 1):
+            
+            # print(f'close enough? {math.isclose(abs(LA.norm(end) - LA.norm(astral)), 0, abs_tol=1e-15)}')
+            # print(f'state={state}')
+            push = 1
+        
+        # print(f'CHECK PUSH->{push>0}')
+        
+    return bind, push, state, free_spots, astral_which_spot
+
 def check_bind(i, j,astral,spindle_poles,spots,free_spots,astral_which_spot):
     """
     Find the distance between the astral MT tip and the closest FG. If they are close enough, they bind together.
@@ -934,7 +1122,7 @@ def check_bind(i, j,astral,spindle_poles,spots,free_spots,astral_which_spot):
         bind=0
     return bind,free_spots,astral_which_spot
     
-def check_push(a,b,astral,bind,state,astral_angles,spindle_poles,cell):
+def check_push(a,b,astral,state,astral_angles,spindle_poles,cell):
     """
     Determines if a given MT is long enough to push
     or not.
@@ -945,12 +1133,13 @@ def check_push(a,b,astral,bind,state,astral_angles,spindle_poles,cell):
         
     # math.isclose(abs(LA.norm(end)-LA.norm(astral)), 0, abs_tol=1e-12)
     # if (bind==0 and abs(LA.norm(end)-LA.norm(astral))<=min_push_dist and state==1):
-    if (bind==0 and math.isclose(abs(LA.norm(end)-LA.norm(astral)), 0, abs_tol=1e-15) and state==1):
+    if (math.isclose(abs(LA.norm(end)-LA.norm(astral)), 0, abs_tol=1e-15) and state==1):
         push=1
     else:
         push=0
 
     return push
+    
 
 def check_push_junc(a,b,astral,bind,state,astral_angles,spindle_poles,cell, spots):
     """
@@ -1110,7 +1299,8 @@ def get_spindle_angle(spindle):
     return angle
 
 def grow_astralMT(a,b,angle,C,cell,orig_length):
-
+    
+    # print("grow_astralMT")
     #Returns MT end point after growrth and if it touches the cortex (which_push) since state=1 because its growing 
     intersect, _ =intersect_cell(a,b,angle,C,cell)
     
@@ -1121,22 +1311,31 @@ def grow_astralMT(a,b,angle,C,cell,orig_length):
     """
     len1=LA.norm([C[0]-intersect[0],C[1]-intersect[1]])
     len2=LA.norm([C[0]-end[0],C[1]-end[1]])
-    if (orig_length+config.growth_rate*time_step>=config.MT_max_length):
-        if (point_in_polygon(C+(orig_length)*np.array([np.cos(angle),np.sin(angle)]), cell)==True):
-            return C+(orig_length)*np.array([np.cos(angle),np.sin(angle)]), 0
-        else:
-            return intersect,1
-    elif (len2<len1):# and point_in_polygon(end, cell)==True): #If grown end is closer to the pole than intersect with the cortex
-        return end,0
+    # if (orig_length+config.growth_rate*time_step>=config.MT_max_length):
+    #     if (point_in_polygon(C+(orig_length)*np.array([np.cos(angle),np.sin(angle)]), cell)==True):
+    #         return C+(orig_length)*np.array([np.cos(angle),np.sin(angle)]), 0
+    #     else:
+    #         return intersect,1
+   
+    if (len2<len1):# and point_in_polygon(end, cell)==True): #If grown end is closer to the pole than intersect with the cortex
+        # print(f'grow end={end}, start_point={C}')
+        # print(f'new MT length= {LA.norm(C-end)}')
+        return end
     else:
-        return intersect,1
+        # print(f'grow intersect={end}, start_point={C}')
+        # print(f'new MT length= {LA.norm(C-end)}')
+        return intersect
 
 def make_new_MT(i,j,a,b,MT,spindle_poles,astral_angles,cell,free_spots,astral_which_spot, orig_length):
     free_spots[np.argwhere((astral_which_spot[:,0]==i) & (astral_which_spot[:,1]==j))]=0
     orig_length=0
-    MT[-1],which_push=grow_astralMT(a,b,astral_angles[i,j],spindle_poles[i],cell,orig_length)
+    MT[-1]=grow_astralMT(a,b,astral_angles[i,j],spindle_poles[i],cell,orig_length)
+    
     MT=restructure(MT)
-    return MT,which_push
+
+    # print(f'new MT length= {LA.norm(MT[-1]-spindle_poles[i])}')
+    # print(f'new MT angle={astral_angles[i,j]}')
+    return MT
 
 def update_astral_MTs(params,cell,spindle_poles,spindle_angle,delta_spindle_angle,astral_MTs,astral_angles,state, which_push, which_bind, spots,free_spots,astral_which_spot,orig_length,force_vector_1,force_vector_2, run):
     a=params[0][0]
@@ -1216,6 +1415,31 @@ def update_astral_MTs(params,cell,spindle_poles,spindle_angle,delta_spindle_angl
             elif(which_bind[i,j]==0): # didn't bind (which_bind[i,j]=0)
                 df_list.append('Not Dead not binded')
                 #Determine if rescue/catastrophe happens
+                # Generate random numbers first so we can show them in debug
+                # rand_catastr = random.uniform(0, 1)
+                # rand_rescue = random.uniform(0, 1)
+                
+                # if (state[i,j] > 0 and rand_catastr <= prob_catastr):  # if catastrophe happens
+                #     print(f"DEBUG: Cell [{i},{j}] - CATASTROPHE (state={state[i,j]})")
+                #     print(f"       Random {rand_catastr:.4f} <= {prob_catastr:.4f} (catastrophe threshold)")
+                #     state[i,j] = -1
+                #     rate = config.shrink_rate
+                #     df_list.append('Catastrophe')
+                    
+                # elif (state[i,j] < 0 and rand_rescue <= prob_rescue):  # if rescue happens
+                #     print(f"DEBUG: Cell [{i},{j}] - RESCUE (state={state[i,j]})")
+                #     print(f"       Random {rand_rescue:.4f} <= {prob_rescue:.4f} (rescue threshold)")
+                #     state[i,j] = 1
+                #     rate = config.growth_rate
+                #     df_list.append('Rescue')
+                    
+                # else:
+                #     current_state = state[i,j]
+                #     print(f"DEBUG: Cell [{i},{j}] - NO CHANGE (state={current_state})")
+                #     print(f"       Catastrophe check: {rand_catastr:.4f} > {prob_catastr:.4f}" if current_state > 0 else 
+                #           f"       Rescue check: {rand_rescue:.4f} > {prob_rescue:.4f}")
+                #     df_list.append('Neither R or C')
+                #     rate = config.shrink_rate if current_state == -1 else config.growth_rate
                 if (state[i,j]>0 and random.uniform(0, 1)<=prob_catastr):  #if catastrophe happens
                     state[i,j] = -1
                     rate=config.shrink_rate
@@ -1234,6 +1458,7 @@ def update_astral_MTs(params,cell,spindle_poles,spindle_angle,delta_spindle_angl
                 
                 #SHRINKING   
                 if(state[i,j]==-1):
+                    # print("SHRINKING")
                     old_astral_MTs=spindle_poles[i]+orig_length[i,j]*np.array([np.cos(astral_angles[i,j]),np.sin(astral_angles[i,j])]) # Shifting astral MTs due to new -end coordinate
                     length_delta=rate*np.array([np.cos(astral_angles[i,j]),np.sin(astral_angles[i,j])]) # shrink length
                     astral_MTs[i,j,-1]=old_astral_MTs+length_delta # Substracting
@@ -1251,7 +1476,9 @@ def update_astral_MTs(params,cell,spindle_poles,spindle_angle,delta_spindle_angl
                         opt_astral_angles=np.zeros((2,n_astro))
                         opt_astral_angles[0]=np.linspace(spindle_angle-spread/2,spindle_angle+spread/2, n_astro)
                         opt_astral_angles[1]=np.linspace(spindle_angle+np.pi-spread/2,spindle_angle+np.pi+spread/2, n_astro)
-                        astral_MTs[i,j],which_push[i,j]=make_new_MT(i,j,a,b, astral_MTs[i,j],spindle_poles,opt_astral_angles,cell,free_spots,astral_which_spot, orig_length[i,j])
+                        
+                        
+                        astral_MTs[i,j]=make_new_MT(i,j,a,b, astral_MTs[i,j],spindle_poles,opt_astral_angles,cell,free_spots,astral_which_spot, orig_length[i,j])
                         astral_angles[i,j]=get_astral_angle(astral_MTs[i,j])
                         orig_length[i,j]==LA.norm(astral_MTs[i,j,-1]-spindle_poles[i])
                         state[i,j]=1
@@ -1260,12 +1487,19 @@ def update_astral_MTs(params,cell,spindle_poles,spindle_angle,delta_spindle_angl
                         df_list.append('not short shrinking')
                     #Update length and check for a new pulling or pushing MT emergence
                     orig_length[i,j]=LA.norm(astral_MTs[i,j,-1]-spindle_poles[i])
-                    which_bind[i,j],free_spots,astral_which_spot=check_bind(i, j,astral_MTs[i,j,-1],spindle_poles,spots,free_spots,astral_which_spot)
-                    #print(f'shrinking')
-                    which_push[i,j]=check_push(a,b,astral_MTs[i,j,-1],which_bind[i,j],state[i,j],astral_angles[i,j],spindle_poles[i],cell)
+                    
+                    which_push[i,j], which_bind[i,j], state[i,j], free_spots,astral_which_spot=check_push_bind(i, j, astral_MTs[i,j,-1], spindle_poles, spots, free_spots, astral_which_spot, state[i,j], astral_angles[i,j], cell)
+                    
+                    # which_bind[i,j],free_spots,astral_which_spot=check_bind(i, j,astral_MTs[i,j,-1],spindle_poles,spots,free_spots,astral_which_spot)
+                    # if (which_bind[i,j]==1):
+                    #     which_push[i,j]=0
+                    #     state[i,j]=-1
+                    # else:
+                    #     which_push[i,j]=check_push(a,b,astral_MTs[i,j,-1],state[i,j],astral_angles[i,j],spindle_poles[i],cell)
                     # which_push[i,j]=check_push_junc(a,b,astral_MTs[i,j, -1],which_bind[i,j],state[i,j],astral_angles[i,j],spindle_poles[i],cell, spots)
                 #GROWING    
                 else: 
+                    # print("GROWING")
                     old_angle=astral_angles[i,j]
                     #print(f'orig_length[i,j]={orig_length[i,j]},LA.norm={LA.norm(astral_MTs[i,j,-1]-spindle_poles[i])}')
                     #astral_angles[i,j]=get_astral_angle(astral_MTs[i,j])
@@ -1298,7 +1532,7 @@ def update_astral_MTs(params,cell,spindle_poles,spindle_angle,delta_spindle_angl
                             which_push[i,j]=0
                             state[i,j]=-1
                         else:
-                            which_push[i,j]=check_push(a,b,astral_MTs[i,j,-1],which_bind[i,j],state[i,j],astral_angles[i,j],spindle_poles[i],cell)
+                            which_push[i,j]=check_push(a,b,astral_MTs[i,j,-1],state[i,j],astral_angles[i,j],spindle_poles[i],cell)
                             # which_push[i,j]=check_push_junc(a,b,astral_MTs[i,j, -1],which_bind[i,j],state[i,j],astral_angles[i,j],spindle_poles[i],cell, spots)
                         # if (abs(LA.norm(astral_MTs[i,j,-1]-spindle_poles[i])-orig_length[i,j])>config.growth_rate*time_step):
                             
@@ -1307,12 +1541,19 @@ def update_astral_MTs(params,cell,spindle_poles,spindle_angle,delta_spindle_angl
                         df_list.append('not short config.slipping') 
                     else:
                         # print("astral--------+++++++++++++++++++++++++++++++-",i,j)
-                        astral_MTs[i,j,-1],which_push[i,j]=grow_astralMT(a,b,astral_angles[i,j],spindle_poles[i],cell,orig_length[i,j])
-                        which_bind[i,j],free_spots,astral_which_spot=check_bind(i, j,astral_MTs[i,j,-1],spindle_poles,spots,free_spots,astral_which_spot)
-                        if (which_bind[i,j]==1):
-                            which_push[i,j]=0
-                            state[i,j]=-1
-                        
+                        astral_MTs[i,j,-1]=grow_astralMT(a,b,astral_angles[i,j],spindle_poles[i],cell,orig_length[i,j])
+                        # which_push[i,j]=check_push(a,b,astral_MTs[i,j,-1],state[i,j],astral_angles[i,j],spindle_poles[i],cell)
+                        # which_bind[i,j],free_spots,astral_which_spot=check_bind(i, j,astral_MTs[i,j,-1],spindle_poles,spots,free_spots,astral_which_spot)
+                        # if (which_bind[i,j]==1):
+                        #     which_push[i,j]=0
+                        #     state[i,j]=-1
+
+                        which_bind[i,j], which_push[i,j],state[i,j], free_spots,astral_which_spot=check_push_bind(i, j, astral_MTs[i,j,-1], spindle_poles, spots, free_spots, astral_which_spot, state[i,j], astral_angles[i,j], cell)
+                        # if (which_bind[i,j]==1):
+                        #     print("PULLING")    
+                        # if (which_push[i,j]==1):
+                        #     print("PULLING")  
+                        # shouldnt check push also be here?
                         #print(f'grow astral_MTs[{i,j}] -> {(length_after-length_before):.3f}')
                         df_list.append('not short growing') 
             orig_length[i,j]=LA.norm(astral_MTs[i,j,-1]-spindle_poles[i])
@@ -1327,7 +1568,7 @@ def update_astral_MTs(params,cell,spindle_poles,spindle_angle,delta_spindle_angl
             df_list.append(which_push[i,j])
             df_list.append(state[i,j])
             if (i==0):
-                 df_list.append(np.linalg.norm(force_vector_1[j]))
+                df_list.append(np.linalg.norm(force_vector_1[j]))
             else:
                 df_list.append(np.linalg.norm(force_vector_2[j]))
 
@@ -1372,6 +1613,7 @@ def rotate_points(points, spindle_angle):
 def compute_resistance_functions(a, b):
     """
     Computes the translational and rotational resistance functions (Table 3.4).
+    Now handles circular cross-sections (a == b) with analytical solutions.
     
     Parameters:
     a : float - Semi-major axis
@@ -1381,29 +1623,27 @@ def compute_resistance_functions(a, b):
     X_A, Y_A, X_C, Y_C : float - Resistance functions for translation & rotation
     """
     
-    # Check for valid input
-    if a <= b:
-        raise ValueError("Semi-major axis (a) must be greater than semi-minor axis (b).")
+    # Check for circular case first
+    if a == b:
+        # Analytical solutions for circle (all equal)
+        resistance = 16/3
+        return resistance, resistance, resistance, resistance
+    
+    # Original check for invalid input
+    if a < b:
+        raise ValueError("Semi-major axis (a) must be greater than or equal to semi-minor axis (b).")
     
     # Compute eccentricity
     e = np.sqrt(1 - (b**2 / a**2))
-    # print(f"DEBUG: Eccentricity (e) = {e}")
-
+    
     # Compute logarithmic correction term
     L = np.log((1 + e) / (1 - e))
-    # print(f"DEBUG: Logarithmic correction (L) = {L}")
-
+    
     # Compute resistance functions
     X_A = (8/3) * (e**3 / (-2 * e + (1 + e**2) * L))
     Y_A = (16/3) * (e**3 / (2 * e + (1 + e**2) * L))
     X_C = (4/3) * (e**3 * (1 - e**2) / (2 * e - (1 - e**2) * L))
     Y_C = (4/3) * (e**3 * (2 - e**2) / (-2 * e + (1 + e**2) * L))
-
-    # Debugging outputs for computed resistance functions
-    # print(f"DEBUG: X_A (Parallel Translational Resistance) = {X_A}")
-    # print(f"DEBUG: Y_A (Perpendicular Translational Resistance) = {Y_A}")
-    # print(f"DEBUG: X_C (Parallel Rotational Resistance) = {X_C}")
-    # print(f"DEBUG: Y_C (Perpendicular Rotational Resistance) = {Y_C}")
 
     return X_A, Y_A, X_C, Y_C
 
@@ -1431,9 +1671,14 @@ def check_spindle(spindle_poles, spindle_angle, cell, r, w):
     dist_pole1 = distance_to_boundary(spindle_poles[0], cell)
     dist_pole2 = distance_to_boundary(spindle_poles[1], cell)
     min_dist = min(dist_pole1, dist_pole2)
-
-
+    spindle_body=generate_spindle(spindle_poles, spindle_angle, r, w)
+    spindle_polygon=Polygon(spindle_body)
+    
     # Check boundary conditions
+    if cell_type=='endo' and cell_polygon.intersects(spindle_polygon):
+        print(f"Debug: Boundary condition violated! - Spindle outside")
+        return False
+    
     if min_dist <= config.min_cortex_dist:# or cell_polygon.intersects(spindle_polygon):
         print(f"Debug: Boundary condition violated!")
         # Debug: Print boundary violation details
@@ -1571,8 +1816,16 @@ def move_spindle(params, astral_MTs,astral_angles, state,spindle_poles,spindle_a
     t_time=i*time_step
 
     spindle_b=0.8*r
+    
+    dum_spot=astral_which_spot
+    if (cell_type=='endo'):
+        if (int(t_time)%frame_rates[c-1]==0 and i>int(0.9*frame_rates[c-1]) and i<total_time/time_step):
+            cell=update_cell(params, t_time)
+            spots=make_spots(int(params[1]),a, b,cell,spindle_poles, int(t_time/frame_rates[c-1]))
+            free_spots=transfer_free_spots(len(spots), free_spots)
+            astral_which_spot=transfer_astro_which(len(spots), dum_spot)
 
-    X_A, Y_A, X_C, Y_C = compute_resistance_functions(r, w)
+    X_A, Y_A, X_C, Y_C = compute_resistance_functions(max(r, w), min(r, w))
 
     # Projection operators
 
@@ -1585,15 +1838,15 @@ def move_spindle(params, astral_MTs,astral_angles, state,spindle_poles,spindle_a
     if (np.min(dist_to_cort[0])<=1.5*config.min_cortex_dist):
 
         repel_vec1=-spindle_poles[0]/LA.norm(spindle_poles[0])
-        repel_force1=(repel/np.min(dist_to_cort[0])**1)*repel_vec1
+        repel_force1=(config.repel/np.min(dist_to_cort[0])**1)*repel_vec1
 
     if (np.min(dist_to_cort[1])<=1.5*config.min_cortex_dist):
 
         repel_vec2=-spindle_poles[1]/LA.norm(spindle_poles[1])
-        repel_force2=(repel/np.min(dist_to_cort[1])**1)*repel_vec2
+        repel_force2=(config.repel/np.min(dist_to_cort[1])**1)*repel_vec2
 
     
-    # print(f'repel force={repel_force1, repel_force2}')
+    print(f'repel force={repel_force1, repel_force2}')
     
     push_force, pull_force=find_force(astral_MTs,spindle_poles,which_bind,which_push, v_c)
 
@@ -1628,7 +1881,7 @@ def move_spindle(params, astral_MTs,astral_angles, state,spindle_poles,spindle_a
     torque=find_torque(spindle_poles, r, force1, force2)
     old_poles=spindle_poles
     
-    print(f'Net force={np.linalg.norm(force_net)}, torque={torque}')
+    # print(f'Net force={np.linalg.norm(force_net)}, torque={torque}')
     if (np.linalg.norm(force_net)!=0 and torque!=0):
 
         T=np.array([0,0,torque])
@@ -1638,9 +1891,9 @@ def move_spindle(params, astral_MTs,astral_angles, state,spindle_poles,spindle_a
         I = np.eye(3)  # Identity tensor
         P_perp = I - d_outer  # Projection perpendicular to the symmetry axis
         # Compute translational velocity
-        U = (F / (6 * np.pi * mu * a)) @ (X_A * d_outer + Y_A * P_perp)
+        U = (F / (6 * np.pi * mu * r)) @ (X_A * d_outer + Y_A * P_perp)
         # Compute rotational velocity
-        Omega = (T / (8 * np.pi * mu * a**3)) @ (X_C * d_outer + Y_C * P_perp)
+        Omega = (T / (8 * np.pi * mu * r**3)) @ (X_C * d_outer + Y_C * P_perp)
         # print(f'Ang velo={Omega}')
 
         Omega=Omega[2]
@@ -1765,13 +2018,77 @@ def move_spindle(params, astral_MTs,astral_angles, state,spindle_poles,spindle_a
     print(f'[DEBUG] Position change={spindle_poles-old_poles, LA.norm(spindle_poles-old_poles)}')
     
     v_c=(spindle_poles-old_poles)/time_step
-    print(f'v_c={v_c}')
+    # print(f'v_c={v_c}')
         
     astral_MTs, astral_angles, state, which_push,which_bind,free_spots,astral_which_spot,orig_length, df_list2=update_astral_MTs(params,cell,spindle_poles,spindle_angle,delta_spindle_angle,astral_MTs,astral_angles, state,which_push, which_bind,spots,free_spots,astral_which_spot,orig_length,force_vector_1,force_vector_2,i)
     
     return cell, spots, spindle_poles, spindle_angle, astral_MTs, astral_angles, state, which_push,which_bind,free_spots,astral_which_spot,orig_length, df_list2, ratio, push_force, pull_force, v_c#force1_next,force2_next
 
 
+def move_severed_spindle(params, astral_MTs, astral_angles, state, spindle_poles, spindle_angle, cell, spots, which_push, which_bind, free_spots, astral_which_spot, orig_length, v_c, i):
+    # Parameters
+    a = params[0][0]  # Sphere radius (formerly semi-major axis)
+    b = params[0][1]  # Unused now (was semi-minor axis)
+    r = params[0][2]  # Original spindle length (now used for distance checks)
+    t_time = i * time_step
+
+    # Each centrosome is now an independent sphere with radius 'a'
+    mu = config.visc
+
+    # Calculate forces for each centrosome independently
+    push_force, pull_force = find_force(astral_MTs, spindle_poles, which_bind, which_push, v_c)
+    
+    # Force vectors for each centrosome
+    force1 = np.sum(pull_force[0] + push_force[0], axis=0)
+    force2 = np.sum(pull_force[1] + push_force[1], axis=0)
+
+    # Calculate movement for each centrosome independently (Stokes' law for spheres)
+    def move_sphere(position, force, cell_boundary, sphere_radius):
+        # Simple Stokes' drag for sphere
+        velocity = force / (6 * np.pi * mu * sphere_radius)
+        
+        # Proposed new position
+        new_position = position + velocity * time_step
+        
+        # Check boundary conditions (similar to original check_spindle but for single sphere)
+        if LA.norm(new_position) < cell_boundary - sphere_radius:
+            return new_position, velocity
+        else:
+            # If would hit boundary, scale down movement
+            max_dist = cell_boundary - sphere_radius - LA.norm(position)
+            if max_dist > 0:
+                scale = max_dist / LA.norm(velocity * time_step)
+                return position + velocity * time_step * scale, velocity * scale
+            else:
+                return position, np.zeros(2)
+
+    # Move each centrosome independently
+    cell_radius = LA.norm(cell[0])  # Assuming cell is circular
+    new_pole1, v1 = move_sphere(spindle_poles[0], force1, cell_radius, 0.025)
+    new_pole2, v2 = move_sphere(spindle_poles[1], force2, cell_radius, 0.025)
+
+    # Update spindle poles (now independent)
+    spindle_poles = np.array([new_pole1, new_pole2])
+    v_c = np.array([0,0])#(spindle_poles - old_poles) / time_step
+
+    # Update spindle angle based on new pole positions
+    #vec = spindle_poles[1] - spindle_poles[0]
+    new_angle = spindle_angle#np.arctan2(vec[1], vec[0]) if LA.norm(vec) > 0 else spindle_angle
+    delta_spindle_angle = new_angle - spindle_angle
+    spindle_angle = new_angle
+
+    # Update MTs (same as before but now poles may be completely independent)
+    astral_MTs, astral_angles, state, which_push, which_bind, free_spots, astral_which_spot, orig_length, df_list2 = update_astral_MTs(
+        params, cell, spindle_poles, spindle_angle, delta_spindle_angle, astral_MTs, astral_angles, 
+        state, which_push, which_bind, spots, free_spots, astral_which_spot, orig_length, 
+        pull_force[0] + push_force[0], pull_force[1] + push_force[1], i)
+
+    # Calculate force ratios (for reporting)
+    pull_t = np.sum(pull_force[0]) + np.sum(pull_force[1])
+    push_t = np.sum(push_force[0]) + np.sum(push_force[1])
+    ratio = 100 * LA.norm(pull_t) / (LA.norm(pull_t) + LA.norm(push_t)) if (LA.norm(pull_t) + LA.norm(push_t)) > 0 else 0
+
+    return cell, spots, spindle_poles, spindle_angle, astral_MTs, astral_angles, state, which_push, which_bind, free_spots, astral_which_spot, orig_length, df_list2, ratio, push_force, pull_force, v_c
 
 # def move_spindle(params, astral_MTs,astral_angles, state,spindle_poles,spindle_angle,cell,spots,which_push, which_bind,free_spots,astral_which_spot,orig_length, v_c, i):
     
@@ -1963,6 +2280,7 @@ def plot_cell(cell ,astral_MTs,astral_angles, state, spindle_poles,spindle_angle
     but all the vectors (lines) are shown for future iteration. Basically, vectors predict the next step."""
     #cell ,astral_MTs, state, spindle_poles,spindle_angle,force1_next,force2_next,spots,i,which_bind, which_push=plot_list
     # Initialization
+    tpoint=i
     a=params[0][0]
     b=params[0][1]
     if (cell_type=='FE'):
@@ -2006,12 +2324,12 @@ def plot_cell(cell ,astral_MTs,astral_angles, state, spindle_poles,spindle_angle
     if (np.min(dist_to_cort[0])<=1.5*config.min_cortex_dist):
 
         repel_vec1=-spindle_poles[0]/LA.norm(spindle_poles[0])
-        repel_force1=(repel/np.min(dist_to_cort[0]))*repel_vec1
+        repel_force1=(config.repel/np.min(dist_to_cort[0]))*repel_vec1
 
     if (np.min(dist_to_cort[1])<=1.5*config.min_cortex_dist):
 
         repel_vec2=-spindle_poles[1]/LA.norm(spindle_poles[1])
-        repel_force2=(repel/np.min(dist_to_cort[1]))*repel_vec2
+        repel_force2=(config.repel/np.min(dist_to_cort[1]))*repel_vec2
 
     
    
@@ -2068,10 +2386,10 @@ def plot_cell(cell ,astral_MTs,astral_angles, state, spindle_poles,spindle_angle
     # ax.scatter([spindle_poles[0,0],spindle_poles[1,0]],[spindle_poles[0,1],spindle_poles[1,1]],color='w',label='Pull/Push = %.5f'%(ratio), s=100, edgecolors='k')
     # ax.plot([spindle_poles[0,0],spindle_poles[1,0]],[spindle_poles[0,1],spindle_poles[1,1]],color='m',linewidth=7)#,label='Pull/Push = %.5f'%(ratio))
     
-    ax.plot(cell[:,0], cell[:,1], color = 'salmon',label='Step = %.1f'%(n), linewidth=1, zorder=10)
+    ax.plot(cell[:,0], cell[:,1], color = 'salmon',label='Step = %.1f'%(n), linewidth=5, zorder=10)
     # plt.fill(cell[:,0], cell[:,1], color='lavenderblush', edgecolor='black', linewidth=2)
 
-    ax.scatter([spindle_poles[0,0],spindle_poles[1,0]],[spindle_poles[0,1],spindle_poles[1,1]],color='yellow', s=150, edgecolors='k',zorder=3)
+    ax.scatter([spindle_poles[0,0],spindle_poles[1,0]],[spindle_poles[0,1],spindle_poles[1,1]],color='yellow', s=150, edgecolors='k',zorder=6)
     
     # CORTEX 
     
@@ -2091,26 +2409,26 @@ def plot_cell(cell ,astral_MTs,astral_angles, state, spindle_poles,spindle_angle
     # COLORCODING MTs
     for i in range (len(astral_MTs[0])):
         if (which_bind[0,i]==1):#binded
-            ax.plot(astral_MTs[0,i,:,0],astral_MTs[0,i,:,1],'red')
+            ax.plot(astral_MTs[0,i,:,0],astral_MTs[0,i,:,1],'red', zorder=5)
 
         elif (state[0,i]==-1):#shrinking
-            ax.plot(astral_MTs[0,i,:,0],astral_MTs[0,i,:,1],'tab:cyan')
+            ax.plot(astral_MTs[0,i,:,0],astral_MTs[0,i,:,1],'tab:cyan', zorder=3)
 
         elif(which_push[0,i]==1):#pushing
-            ax.plot(astral_MTs[0,i,:,0],astral_MTs[0,i,:,1],'darkgreen')
+            ax.plot(astral_MTs[0,i,:,0],astral_MTs[0,i,:,1],'darkgreen', zorder=4)
 
         else: #which_push=0, state=1,which_bind=0
-            ax.plot(astral_MTs[0,i,:,0],astral_MTs[0,i,:,1],'slateblue')
+            ax.plot(astral_MTs[0,i,:,0],astral_MTs[0,i,:,1],'slateblue', zorder=2)
 
     for i in range (len(astral_MTs[1])):  
         if (which_bind[1,i]==1):
-            ax.plot(astral_MTs[1,i,:,0],astral_MTs[1,i,:,1],'tab:red')
+            ax.plot(astral_MTs[1,i,:,0],astral_MTs[1,i,:,1],'tab:red', zorder=5)
         elif (state[1,i]==-1):
-            ax.plot(astral_MTs[1,i,:,0],astral_MTs[1,i,:,1],'tab:cyan')   
+            ax.plot(astral_MTs[1,i,:,0],astral_MTs[1,i,:,1],'tab:cyan', zorder=3)
         elif(which_push[1,i]==1):
-            ax.plot(astral_MTs[1,i,:,0],astral_MTs[1,i,:,1],'green')
+            ax.plot(astral_MTs[1,i,:,0],astral_MTs[1,i,:,1],'green', zorder=4)
         else:
-            ax.plot(astral_MTs[1,i,:,0],astral_MTs[1,i,:,1],'slateblue')#'tab:purple')
+            ax.plot(astral_MTs[1,i,:,0],astral_MTs[1,i,:,1],'slateblue', zorder=2)#'tab:purple')
    
     # Force vectors-------------------------------------------------------------------------------------------
     
@@ -2118,7 +2436,8 @@ def plot_cell(cell ,astral_MTs,astral_angles, state, spindle_poles,spindle_angle
     theta = np.linspace(0, 2*np.pi, 360)[:-1].copy()
     com=np.array([(spindle_poles[0,0]+spindle_poles[1,0])/2,(spindle_poles[0,1]+spindle_poles[1,1])/2])
     spindle_envelope[:,0]=r*np.cos(theta)+com[0]
-    spindle_envelope[:,1]=r*np.sin(theta)+com[-1]
+    spindle_envelope[:,1]=w*np.sin(theta)+com[-1]
+    spindle_envelope = rotate_points(spindle_envelope, spindle_angle)
     if (cell_type=='celegans'):
         ax.plot(spindle_envelope[:,0], spindle_envelope[:,1], linewidth=7,color='grey', zorder=1)#,label='Spindle envelope')
         plt.fill(spindle_envelope[:,0], spindle_envelope[:,1], color='lightsteelblue', edgecolor='darkgrey', linewidth=2)
@@ -2187,13 +2506,14 @@ def plot_cell(cell ,astral_MTs,astral_angles, state, spindle_poles,spindle_angle
         plt.text(right_max-2.1, top-0.2, 'Mean astral MTs length = %.2f'%(mean_length), fontsize = 12)
         plt.text(right_max-2.1, top-0.3, 'Pull/Push = %.2f'%(ratio), fontsize = 12)
         plt.text(right_max-2.1, top-0.4, f'Pull,Push = {np.sum(count_pulling), np.sum(count_pushing)}', fontsize = 12)
-        # plt.text(right_max-1.6, top-0.5, 'force1 pull=%.3f, force1 push=%.3f'%(LA.norm(sect_force_1[0]), LA.norm(sect_force_1[1])))
-        # plt.text(right_max-1.6, top-0.6, 'force2 pull=%.3f, force2 push=%.3f'%(LA.norm(sect_force_2[0]), LA.norm(sect_force_2[1])))
-        # plt.text(right_max-1.6, top-0.7, 'force3 pull=%.3f, force3 push=%.3f'%(LA.norm(sect_force_3[0]), LA.norm(sect_force_3[1])))
+        
+        # plt.text(right_max-2.1, top-0.5, 'force1 pull=%.3f, force1 push=%.3f'%(LA.norm(sect_force_1[0]), LA.norm(sect_force_1[1])))
+        # plt.text(right_max-2.1, top-0.6, 'force2 pull=%.3f, force2 push=%.3f'%(LA.norm(sect_force_2[0]), LA.norm(sect_force_2[1])))
+        # plt.text(right_max-2.1, top-0.7, 'force3 pull=%.3f, force3 push=%.3f'%(LA.norm(sect_force_3[0]), LA.norm(sect_force_3[1])))
         rect = patches.Rectangle((right_max-1.2, top-1.1), 0.3, 0.3, facecolor=create_color_gradient(ratio/100))
     else:
         plt.text(right_max - 1, top - 0.3,  # Adjusted y-coordinate: top - 0.1 → top - 0.3
-         f'Repel 1 = {np.linalg.norm(repel_force1):.2f}, Repel 2 = {np.linalg.norm(repel_force2):.2f}', 
+         f'Total force = {np.linalg.norm(LA.norm(force1+force2)):.3f}', 
          fontsize=10)
         #plt.text(right_max-0.9, top-0.3, 'Pull/Push = %.2f'%(ratio), fontsize = 10)  # Adjusted y-coordinate: top-0.3 → top-0.5
 
@@ -2216,71 +2536,87 @@ def plot_cell(cell ,astral_MTs,astral_angles, state, spindle_poles,spindle_angle
     #label=r'$\sin (x)$'
     ax.add_patch(rect)
     # Parameters for the free body diagram
-    rod_length = 0.6  # Length of the rod
-    rod_angle = np.rad2deg(spindle_angle)  # Angle of the rod in degrees
-    sphere_radius = 0.1  # Radius of the spheres at the ends of the rod
-    
-    # Convert angle to radians
-    rod_angle_rad = np.radians(rod_angle)
-    
-    # Calculate the positions of the spheres
-    center_x, center_y = 1.8, -0.2  # Center of the rod
-    end1_x = center_x + (rod_length / 2) * np.cos(rod_angle_rad)
-    end1_y = center_y + (rod_length / 2) * np.sin(rod_angle_rad)
-    end2_x = center_x - (rod_length / 2) * np.cos(rod_angle_rad)
-    end2_y = center_y - (rod_length / 2) * np.sin(rod_angle_rad)
-    
-    # Draw the rod
-    rod = patches.FancyArrowPatch((end1_x, end1_y), (end2_x, end2_y), 
-                                  arrowstyle='-', color='black', lw=2)
-    ax.add_patch(rod)
-    
-    # Draw the spheres
-    sphere1 = patches.Circle((end1_x, end1_y), sphere_radius, color='gold')
-    sphere2 = patches.Circle((end2_x, end2_y), sphere_radius, color='gold')
-    ax.add_patch(sphere1)
-    ax.add_patch(sphere2)
-    
-    # Define the forces as NumPy arrays
-    # Each row represents a force: [magnitude, angle in degrees]
-    forces1 = np.array([
-        push_1_t,   # Push1
-        pull_1_t,  # Pull1
-        repel_force1,  # Repel1
-        force1    # Net1
-    ])
-    
-    forces2 = np.array([
-        push_2_t,   # Push1
-        pull_2_t,  # Pull1
-        repel_force2,  # Repel1
-        force2    # Net1
-    ])
-    
-    colors1 = ['tab:red', 'tab:pink', 'green', 'black']  # Colors for Push1, Pull1, Repel1, Net1
-    colors2 = ['tab:purple', 'blue', 'green', 'black']  # Colors for Push2, Pull2, Repel2, Net2
-    
-    # Labels for the forces
-    labels1 = ["Push1", "Pull1", "Repel1", "Net1"]
-    labels2 = ["Push2", "Pull2", "Repel2", "Net2"]
-    
-    
-    # Draw vectors for the first pole
-    draw_vectors(ax, (end1_x, end1_y), forces1, labels1, colors1)
-    
-    # Draw vectors for the second pole
-    draw_vectors(ax, (end2_x, end2_y), forces2, labels2, colors2)
+    if (config.show_vectors==1):
+        rod_length = 0.6  # Length of the rod
+        rod_angle = np.rad2deg(spindle_angle)  # Angle of the rod in degrees
+        sphere_radius = 0.1  # Radius of the spheres at the ends of the rod
+        
+        # Convert angle to radians
+        rod_angle_rad = np.radians(rod_angle)
+        
+        # Calculate the positions of the spheres
+        center_x, center_y = 1.8, -0.2  # Center of the rod
+        end1_x = center_x + (rod_length / 2) * np.cos(rod_angle_rad)
+        end1_y = center_y + (rod_length / 2) * np.sin(rod_angle_rad)
+        end2_x = center_x - (rod_length / 2) * np.cos(rod_angle_rad)
+        end2_y = center_y - (rod_length / 2) * np.sin(rod_angle_rad)
+        
+        # Draw the rod
+        rod = patches.FancyArrowPatch((end1_x, end1_y), (end2_x, end2_y), 
+                                      arrowstyle='-', color='black', lw=2)
+        ax.add_patch(rod)
+        
+        # Draw the spheres
+        sphere1 = patches.Circle((end1_x, end1_y), sphere_radius, color='gold')
+        sphere2 = patches.Circle((end2_x, end2_y), sphere_radius, color='gold')
+        ax.add_patch(sphere1)
+        ax.add_patch(sphere2)
+        
+        # Define the forces as NumPy arrays
+        # Each row represents a force: [magnitude, angle in degrees]
+        forces1 = np.array([
+            push_1_t,   # Push1
+            pull_1_t,  # Pull1
+            repel_force1,  # Repel1
+            force1    # Net1
+        ])
+        
+        forces2 = np.array([
+            push_2_t,   # Push1
+            pull_2_t,  # Pull1
+            repel_force2,  # Repel1
+            force2    # Net1
+        ])
+        
+        colors1 = ['tab:red', 'tab:pink', 'green', 'black']  # Colors for Push1, Pull1, Repel1, Net1
+        colors2 = ['tab:purple', 'blue', 'green', 'black']  # Colors for Push2, Pull2, Repel2, Net2
+        
+        # Labels for the forces
+        labels1 = ["Push1", "Pull1", "Repel1", "Net1"]
+        labels2 = ["Push2", "Pull2", "Repel2", "Net2"]
+        
+        
+        # Draw vectors for the first pole
+        draw_vectors(ax, (end1_x, end1_y), forces1, labels1, colors1)
+        
+        # Draw vectors for the second pole
+        draw_vectors(ax, (end2_x, end2_y), forces2, labels2, colors2)
     
     # CHROMOSOMES
     
-    if(cell_type!='celegans'):
-        chrom_angle=np.pi/2+spindle_angle
-        n_chrom=6
-        if(cell_type=='FE'):
-            n_chrom=6
-        else:
-            n_chrom=4
+    if(cell_type!='celegans'):# and  tpoint*time_step<severance_time):
+    #     chrom_angle=np.pi/2+spindle_angle
+    #     n_chrom=6
+    #     if(cell_type=='FE'):
+    #         n_chrom=6
+    #     else:
+    #         n_chrom=4
 
+    #     dd=0.7*w
+    #     xs=np.linspace(com[0]-dd*np.cos(chrom_angle),com[0]+dd*np.cos(chrom_angle),n_chrom)
+    #     ys=np.linspace(com[1]-dd*np.sin(chrom_angle),com[1]+dd*np.sin(chrom_angle),n_chrom)
+
+    #     for i in range (n_chrom):
+    #         line1,line2=chrom(xs[i],ys[i],chrom_angle)
+    #         plt.plot([spindle_poles[0,0],xs[i]],[spindle_poles[0,1],ys[i]],color='g',linewidth=6)
+    #         plt.plot([spindle_poles[1,0],xs[i]],[spindle_poles[1,1],ys[i]],color='g',linewidth=6)
+    #         plt.plot(line1[0],line1[1],color='dodgerblue', linewidth=10)
+    #         plt.plot(line2[0],line2[1], color='dodgerblue', linewidth=10)
+    # elif (severance==1 and tpoint*time_step>=severance_time):
+    #     plt.plot([com[0]-1.2*w*np.cos(spindle_angle+np.pi/2),com[0]+1.2*w*np.cos(spindle_angle+np.pi/2) ],[com[1]-1.2*w*np.sin(spindle_angle+np.pi/2),com[1]+1.2*w*np.sin(spindle_angle+np.pi/2)],color='r',linewidth=15)
+    # else:
+        chrom_angle=np.pi/2+spindle_angle
+        n_chrom=4
         dd=0.7*w
         xs=np.linspace(com[0]-dd*np.cos(chrom_angle),com[0]+dd*np.cos(chrom_angle),n_chrom)
         ys=np.linspace(com[1]-dd*np.sin(chrom_angle),com[1]+dd*np.sin(chrom_angle),n_chrom)
@@ -2291,6 +2627,21 @@ def plot_cell(cell ,astral_MTs,astral_angles, state, spindle_poles,spindle_angle
             plt.plot([spindle_poles[1,0],xs[i]],[spindle_poles[1,1],ys[i]],color='g',linewidth=6)
             plt.plot(line1[0],line1[1],color='dodgerblue', linewidth=10)
             plt.plot(line2[0],line2[1], color='dodgerblue', linewidth=10)
+    # elif (severance==1 and tpoint*time_step>=severance_time):
+    #     plt.plot([0-1.2*w*np.cos(spindle_angle+np.pi/2),0+1.2*w*np.cos(spindle_angle+np.pi/2) ],[0-1.2*w*np.sin(spindle_angle+np.pi/2),0+1.2*w*np.sin(spindle_angle+np.pi/2)],color='r',linewidth=15)
+    # else:
+    #     chrom_angle=np.pi/2+spindle_angle
+    #     n_chrom=4
+    #     dd=0.7*w
+    #     xs=np.linspace(com[0]-dd*np.cos(chrom_angle),com[0]+dd*np.cos(chrom_angle),n_chrom)
+    #     ys=np.linspace(com[1]-dd*np.sin(chrom_angle),com[1]+dd*np.sin(chrom_angle),n_chrom)
+
+    #     for i in range (n_chrom):
+    #         line1,line2=chrom(xs[i],ys[i],chrom_angle)
+    #         plt.plot([spindle_poles[0,0],xs[i]],[spindle_poles[0,1],ys[i]],color='g',linewidth=6)
+    #         plt.plot([spindle_poles[1,0],xs[i]],[spindle_poles[1,1],ys[i]],color='g',linewidth=6)
+    #         plt.plot(line1[0],line1[1],color='dodgerblue', linewidth=10)
+    #         plt.plot(line2[0],line2[1], color='dodgerblue', linewidth=10)
     
     ax.legend(ncol=1,loc='upper left')
 
@@ -2392,7 +2743,10 @@ def simulate(params):
             cutoff=i
             break
         # MOVE SPINDLE
+        # if (i*time_step<severance_time and severance==1):
         new_cell, new_spots,new_poles,new_angle, new_astral_MTs,new_astral_angles,new_state,new_which_push, new_which_bind,new_free_spots,new_astral_which_spot,new_orig_length,df_list2, ratio, push_force, pull_force, new_v_c=move_spindle(params,astral_MTs,astral_angles, state,spindle_poles,spindle_angle,cell,spots,which_push, which_bind,free_spots,astral_which_spot,orig_length, v_c, i)
+        # else:    
+        #     new_cell, new_spots,new_poles,new_angle, new_astral_MTs,new_astral_angles,new_state,new_which_push, new_which_bind,new_free_spots,new_astral_which_spot,new_orig_length,df_list2, ratio, push_force, pull_force, new_v_c=move_severed_spindle(params, astral_MTs, astral_angles, state, spindle_poles, spindle_angle, cell, spots, which_push, which_bind, free_spots, astral_which_spot, orig_length, v_c, i)
         
         new_center=np.array([1/2*(new_poles[0,0]+new_poles[1,0]),1/2*(new_poles[0,1]+new_poles[1,1])])
         
@@ -2412,6 +2766,8 @@ def simulate(params):
         mean_length=np.average(leng)
         # DATA LIST
         plot_list.append([cell,new_astral_MTs,new_state,new_poles,new_angle,new_center,new_center[1],spots,np.sum(new_which_bind == 1, axis=1),np.sum(new_which_push == 1, axis=1), mean_length, ratio])
+        # plot_list.append([cell,new_astral_MTs,new_state,new_poles,new_angle,new_poles[0],new_poles[1],spots,np.sum(new_which_bind == 1, axis=1),np.sum(new_which_push == 1, axis=1), mean_length, ratio])
+        
         # PLOTTING
         #if (i%(int(1/time_step))==10):
         if (i%20==0):
@@ -2434,21 +2790,8 @@ def plot_simulate(params):
     if task_id==1:
         file_name=params[4]+'.xlsx'
         file_path = os.path.join(params[5], file_name)
-        # df.to_excel(file_path, index=False)#, columns =['Number','Death', 'Switch', 'Push','State','Length'],index=False, header=False)
-        max_rows = 1_000_000  # Excel's row limit minus header
-        if len(df) <= max_rows:
-            df.to_excel(file_path, index=False)
-        else:
-            # Split the DataFrame into chunks
-            chunks = [df[i:i+max_rows] for i in range(0, df.shape[0], max_rows)]
-            
-            # Save each chunk
-            for i, chunk in enumerate(chunks):
-                if i == 0:
-                    chunk.to_excel(file_path, index=False)
-                else:
-                    base, ext = os.path.splitext(file_path)
-                    chunk.to_excel(f"{base}_part{i+1}{ext}", index=False)
+        df.head(10000).to_excel(file_path, index=False)#, columns =['Number','Death', 'Switch', 'Push','State','Length'],index=False, header=False)
+ 
     # EXTRACTING DATA
     df_angle = [np.rad2deg(row[4]) for row in pl_list]
     df_angle=flip_angles(df_angle)
@@ -2489,11 +2832,13 @@ def extract_parameters(input_string):
     motor_density_match = re.search(r'MUD_(\d+)', input_string)
     astral_MTs_match = re.search(r'MT_(\d+)', input_string)
     push_match = re.search(r'push_([\d.]+)', input_string)
+    pull_match = re.search(r'pull_([\d.]+)', input_string)
     ts_match = re.search(r'ts_([\d.]+)', input_string)
     cell_match = re.search(r'cell_([A-Za-z]+)', input_string)
-    repel_match = re.search(r'repel_([\d.]+)', input_string)
-    mcd_match = re.search(r'mcd_([\d.]+)', input_string)
+    # repel_match = re.search(r'repel_([\d.]+)', input_string)
+    angle_match = re.search(r'angle_([\d.]+)', input_string)
     SL_match = re.search(r'SL_([\d.]+)', input_string)
+    mcd_match = re.search(r'mcd_([\d.]+)', input_string)
 
     if cell_match:
         cell_type = cell_match.group(1)  # Extract the matched string ("FE")
@@ -2504,13 +2849,17 @@ def extract_parameters(input_string):
     motor_density = int(motor_density_match.group(1)) if motor_density_match else None
     astral_MTs = int(astral_MTs_match.group(1)) if astral_MTs_match else None
     push = float(push_match.group(1)) if push_match else None
-    repel = float(repel_match.group(1)) if repel_match else None
-    min_cortex_dist = float(mcd_match.group(1)) if mcd_match else None
+    pull = float(pull_match.group(1)) if pull_match else None
+    # repel = float(repel_match.group(1)) if repel_match else None
+    angle = float(angle_match.group(1)) if angle_match else None
     SL = float(SL_match.group(1)) if SL_match else None
+    
+    mcd = float(mcd_match.group(1)) if mcd_match else None
     time_step = float(ts_match.group(1)) if ts_match else None
 
     # Return as a dictionary
-    return motor_density, astral_MTs, push, repel, SL, time_step, cell_type, min_cortex_dist
+    return motor_density, astral_MTs, push, pull, SL, time_step, cell_type, angle
+
 
 def find_number_after_cell(input_string):
     # Regular expression to find a number after "cell"
@@ -2532,7 +2881,7 @@ class SimulationParameters:
         self.astral_initial_length = 5
         
         self.max_interact_dist = 0.02
-        self.min_cortex_dist = 0.005#min_cortex_dist
+        self.min_cortex_dist = 0.025
         self.MT_min_length = 0.025
         self.MT_max_length = 4
         
@@ -2554,9 +2903,9 @@ class SimulationParameters:
         self.dyn_unbind = 0.02
 
         # Force
-        self.pull = 3.6
-        # self.repel =  2.5
-
+        self.pull=pull
+        self.push=push
+        self.repel =  0
         # Rigidity & Viscosity
         self.EI = 10 * 0.1 * 0.1
         self.visc = 100
@@ -2567,11 +2916,11 @@ class SimulationParameters:
         self.slipping = 0
         self.pivoting = 0
         self.mobile_motors = 0
-        self.force_velocity = 1
-        self.v_0 = v_0
-        self.show_vectors = 1
+        self.force_velocity = 0
+        self.v_0 = 0.086
+        self.show_vectors = 0
         self.uniform_status = 0
-        self.top_status = 0
+        self.top_status = 1
 
     def save_parameters_to_file(self, directory, filename, additional_params=None):
         """
@@ -2616,28 +2965,29 @@ if __name__ == "__main__":
     #"spindle_9214_endo_cell_1_AL_1_0.3_SL_1.8_ts_0.05_opt_forces_3.6_4_2.5_MUD_PINS_10_MT_50_push_1"
     
     task_id =int(os.getenv('SLURM_ARRAY_TASK_ID'))
-    
-    motor_density, astral_number, push_status, repel, SL, time_step, cell_type, v_0 = extract_parameters(name)     
+    job_id = os.getenv('SLURM_JOB_ID')
+    motor_density, astral_number, push, pull, SL, time_step, cell_type, init_sp_angle = extract_parameters(name)     
     # motor_density, astral_number, push_status, time_step, cell_type = 40, 50, 1, 0.05, "FE"
-    
+    # if push_status==1:
+    #     push=4
+    # else:
+    #     push=0
+    # push=push_status
     # Model parameters
     config = SimulationParameters()
     
-
 
     
     # Experiment probabilities
     prob_catastr=1-np.exp(-config.catastr_rate*time_step)
     prob_rescue=1-np.exp(-config.rescue_rate*time_step)
-    prob_dyn_bind = 1 - np.exp(-config.dyn_bind * time_step)
+    prob_dyn_bind =1 - np.exp(-config.dyn_bind * time_step)
     prob_dyn_unbind = 1 - np.exp(-config.dyn_unbind * time_step)
     
-    if push_status==1:
-        push=4
-    else:
-        push=0
-    # push=push_status
 
+    # severance_time=1200
+    # severance=1
+    
     if cell_type == "celegans":
         
         total_time = 600
@@ -2669,18 +3019,19 @@ if __name__ == "__main__":
         sp_angle=np.deg2rad(initial_angles[c-1])*np.ones(50)
     elif cell_type == "FE":
         total_time=1200
-        a, b, r = 1, 1, 0.9  
+        a, b = 1, 1
         r=SL/2
         spread = 3 * np.pi / 2
         w = 0.8 * r
         mean,stdev=1, 0.3
-        sp_angle=np.deg2rad(90)*np.ones(50)
+        sp_angle=np.deg2rad(init_sp_angle)*np.ones(50)
     else:
         raise ValueError(f"Unknown cell type: {cell_type}")
 
     folder_name, new_dir_path = create_simulation_directory(test_folder_path, name, task_id )
     
     additional_params = {
+        "job_id":job_id,
         "total_time": total_time,
         "a": a,
         "b": b,
@@ -2691,7 +3042,7 @@ if __name__ == "__main__":
         "stdev MT length": stdev,
         "sp_angle": sp_angle[0],
         "push": push,
-        "extranote": "translate - then - rotate",
+        "extranote": "severance test",
     }
     # config.save_parameters_to_file(data_folder_path, name+"_parameters_"+str(task_id)+".txt", additional_params)    
     config.save_parameters_to_file(data_folder_path, name+"_parameters.txt", additional_params)   
